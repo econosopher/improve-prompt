@@ -7,6 +7,7 @@ let guidanceDirectory = '';
 const redraw = $ => $.ui.invalidate('ui.render');
 const changed = $ => {
   revision += 1;
+  notice = '';
   if (pending) {
     pending.cancelled = true;
     notice = 'Draft changed; rewrite will not replace it.';
@@ -19,7 +20,7 @@ async function improve($) {
   if (pending) return;
   const job = { cancelled: false, revision };
   pending = job;
-  notice = 'Improving…';
+  notice = '';
   redraw($);
   try {
     const original = (await $.prompt.read()).text;
@@ -73,7 +74,8 @@ async function improve($) {
       notice = 'Composer could not accept the rewrite.'; return;
     }
     undo = { original, replacement, revision };
-    notice = `Improved for ${model}${file ? '' : ' (general guidance)'}. Review before sending.`;
+    notice = '';
+    $.ui.toast(`Improved for ${model}${file ? '': ' (general guidance)'}. Review before sending.`, { timeoutMs: 4000 });
   } catch {
     // Provider errors can contain request text. Keep them out of the UI/logs.
     notice = 'Rewrite failed; draft kept. Check your model connection and try again.';
@@ -92,7 +94,7 @@ async function restore($) {
     notice = 'Draft changed; Undo will not overwrite your edits.';
   } else {
     const filled = await $.prompt.fill({ text: saved.original, mode: 'replace' });
-    notice = filled.isFilled && filled.text === saved.original ? 'Original draft restored.' : 'Could not restore the draft.';
+    notice = filled.isFilled && filled.text === saved.original ? '' : 'Could not restore the draft.';
     if (filled.isFilled) undo = null;
   }
   redraw($);
@@ -111,20 +113,23 @@ export function register(on, options = {}) {
     if (e.props.hasSurvey) return previous;
     const { Box, Text, Button } = $.ui.resolve(e);
     const buttons = pending ? [
-      Button({ key: 'cancel-improve', label: 'Cancel rewrite', onPress: () => {
+      Button({ key: 'cancel-improve', label: pending.cancelled ? 'Cancelling…' : 'Cancel rewrite',
+        plain: true, dimColor: true, disabled: pending.cancelled, onPress: () => {
         pending.cancelled = true;
-        notice = 'Cancelled; draft kept. Waiting for the model request to finish.';
+        notice = '';
         redraw($);
       } }),
     ] : [
-      Button({ key: 'improve-draft', label: 'Improve prompt', disabled: e.props.isWorking,
+      Button({ key: 'improve-draft', label: 'Improve', plain: true, dimColor: true, disabled: e.props.isWorking,
         onPress: () => improve($) }),
-      ...(undo ? [Button({ key: 'undo-improve', label: 'Undo', onPress: () => restore($) })] : []),
+      ...(undo ? [Button({ key: 'undo-improve', label: 'Undo', plain: true, dimColor: true, onPress: () => restore($) })] : []),
     ];
-    return Box({ flexDirection: 'column', children: [
+    return Box({ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 1, children: [
       ...(previous ? [previous] : []),
       Box({ flexDirection: 'row', gap: 1, children: buttons }),
-      ...(notice ? [Text({ dimColor: true, children: [notice] })] : []),
+      ...(notice ? [Text({ dimColor: true, children: [notice] }),
+        Button({ key: 'dismiss-notice', label: 'Dismiss', plain: true, dimColor: true,
+          onPress: () => { notice = ''; redraw($); } })] : []),
     ] });
   });
 }

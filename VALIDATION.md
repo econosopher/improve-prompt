@@ -65,3 +65,11 @@ integration requirements. This skill does not bypass them.
   claim a Codex button or regular-Claude-chat button.
 - Provider calls are real; test prompts are synthetic. No downstream quality
   benchmark, multi-provider matrix, or app-restart persistence test was run.
+
+## Compact controls, version 0.2.2
+
+The desktop Code tab was visually checked after the update: Improve shares one
+row with an existing status mod, Undo restores the exact draft without leaving a
+success message, and edits made during a live rewrite are retained. The test
+composer was left empty. The 16 adapter tests, 25 bundle tests and seven local
+status-mod tests passed. The stale Undo notice regression failed before the fix.

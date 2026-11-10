@@ -71,9 +71,11 @@ claude plugin marketplace add econosopher/improve-prompt
 claude plugin install improve-prompt@improve-prompt
 ```
 
-Open a fresh Claude Code session. Type your draft, click **Improve prompt** above
+Open a fresh Claude Code session. Type your draft, click **Improve** above
 it, then review the replacement in the composer. **Undo** restores the original
-until you edit again. The mod never presses Send. In the terminal, press Ctrl+X,
+until you edit again. The controls share one compact row, and Undo leaves no
+status message behind. Errors clear when you edit or click **Dismiss**. The mod
+never presses Send. In the terminal, press Ctrl+X,
 then Tab to focus the button; press Enter to activate it. Tab moves to Undo.
 
 It uses the current session's model and credentials. Your normal model usage
@@ -83,7 +85,7 @@ Failures and essential ambiguities leave the draft in place.
 
 Only the draft and saved guidance go to the rewrite call. Conversation history
 and attachments are not read. Exact known model IDs use saved profiles; other
-versions use general guidance and are labelled accordingly. Use the skill command
+versions use general guidance, shown in a brief notification after a rewrite. Use the skill command
 for an explicit target-model override or guidance refresh.
 
 The button rereads the skill and its model-routing table on every click. To share

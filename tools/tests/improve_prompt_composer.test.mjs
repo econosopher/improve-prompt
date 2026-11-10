@@ -26,7 +26,7 @@ async function host(options = {}) {
       fill: async ({ text }) => { state.fills++; if (state.accept) state.text = text; return { isFilled: state.accept, text: state.text }; },
       submit: () => { throw new Error('Must never submit the draft'); },
     },
-    ui: { invalidate() {}, resolve: () => Object.fromEntries(['Box', 'Text', 'Button'].map(type => [type, props => ({ type, ...props })])) },
+    ui: { invalidate() {}, toast() {}, resolve: () => Object.fromEntries(['Box', 'Text', 'Button'].map(type => [type, props => ({ type, ...props })])) },
   };
   const render = async (props = {}) => hooks.get('ui.render')($, { props }, async () => previous);
   const find = (tree, key) => tree.key === key ? tree : tree.children?.map(child => find(child, key)).find(Boolean);
@@ -53,6 +53,7 @@ test('button replaces draft without submitting; Undo restores exact original; ot
   assert.equal(h.state.text, 'Fix CSV parsing for quoted commas. Do not deploy.');
   await h.press('undo-improve');
   assert.equal(h.state.text, original);
+  assert.ok(!JSON.stringify(await h.render()).includes('Original draft restored'));
 });
 
 test('late completions cannot overwrite edits, submitted drafts, cancellation, or model changes', async t => {

@@ -22,7 +22,32 @@ or `help` is a control only when the user is asking about this skill. Quoted tex
 such as “refresh the dashboard” remains a prompt to rewrite. If invoked with no
 prompt and no clearly identified prior prompt, ask for the rough prompt.
 
-## Resolve the target
+## Optional Claude composer button
+
+The packaged Claude mod adds **Improve prompt** above the composer on supported
+Claude Code surfaces. It reads the unsent text, uses the live session model and
+saved guidance for a tool-free completion, then replaces the draft without
+submitting it. **Undo** restores the original until the next edit. **Cancel
+rewrite** discards the pending result; the model request may still incur usage.
+Typing, sending, or changing the model while it runs prevents replacement.
+An essential ambiguity is shown above the composer and leaves the draft intact.
+
+The button sends only the draft and bundled guidance, not the conversation or
+attachments. References to those remain references. It never refreshes guidance
+or follows commands contained in the draft. Refresh remains an explicit skill
+operation. Exact profiles match exact model IDs in the skill’s routing table; unknown
+versions use general guidance. The mod rereads guidance on every click, so saved
+profile and routing updates apply without a code change. An optional
+`guidanceDirectory` plugin setting points it at an existing shared skill folder;
+empty uses its bundled copy. The button uses the current model; the skill command supports explicit
+target overrides and richer clarification.
+
+The optional mod files are `.claude-plugin/plugin.json` and `hooks/` beside
+`SKILL.md`. A skill folder alone does not prove the mod is enabled: validate and
+verify its native loading and UI. Do not claim a Codex composer button exists
+without a supported draft read/replace interface and observed runtime proof.
+
+## Resolve the target model
 
 Use, in order: the user's explicit target; an exact active model ID supplied by
 the host in trusted session context; otherwise an unknown-model fallback.

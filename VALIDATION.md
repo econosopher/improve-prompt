@@ -41,3 +41,27 @@ falls back when that information is missing.
 
 Host authentication, review tools and workspace approval rules remain separate
 integration requirements. This skill does not bypass them.
+
+## Composer mod, 10 November 2026
+
+- Native CLI 2.1.318: rendered button, tool-free rewrite into the draft, exact
+  original restoration with Undo. The rewrite itself created no user turn.
+- Native Claude desktop Code, engine 2.1.317: clicked Improve prompt, observed
+  replacement in the composer, clicked Undo and read back the exact original.
+  A draft edited during a pending rewrite was retained.
+- Active model in these tests was `claude-opus-5-5`; because it has no bundled
+  exact profile, the UI correctly labelled general guidance. No model switch
+  was made by the mod.
+- 16 focused adapter tests cover draft/Undo behavior, simultaneous clicks,
+  edits, submission, cancellation, model changes, rejected fill, failed or
+  malformed completion, and refreshed shared-profile routing.
+- 25 owning skill-bundle tests and native Claude plugin validation passed.
+- A pre-existing status mod on the test machine short-circuited AbovePrompt.
+  Its local compatibility fix preserves downstream controls; seven existing
+  tests passed with downstream composition asserted. It is not a dependency
+  of this public package.
+- Codex: no supported composer draft read/replace extension was verified.
+  The native skill/picker workflow remains available; this release does not
+  claim a Codex button or regular-Claude-chat button.
+- Provider calls are real; test prompts are synthetic. No downstream quality
+  benchmark, multi-provider matrix, or app-restart persistence test was run.

@@ -60,7 +60,50 @@ and select the skill. A plugin bundle may add its namespace to the skill name.
 
 This package targets Claude Code and Codex. Regular Claude chat and other skill
 hosts may require their own upload/install flow; those interfaces are not tested
-by this release. A custom toolbar button is not included.
+by this release. An optional Claude composer button is included; see below.
+
+## Claude composer button
+
+Install the optional mod using Claude Code's plugin manager:
+
+```sh
+claude plugin marketplace add econosopher/improve-prompt
+claude plugin install improve-prompt@improve-prompt
+```
+
+Open a fresh Claude Code session. Type your draft, click **Improve prompt** above
+it, then review the replacement in the composer. **Undo** restores the original
+until you edit again. The mod never presses Send. In the terminal, press Ctrl+X,
+then Tab to focus the button; press Enter to activate it. Tab moves to Undo.
+
+It uses the current session's model and credentials. Your normal model usage
+applies. Typing or sending while a rewrite runs discards its result. **Cancel
+rewrite** keeps the draft but does not cancel provider billing for the request.
+Failures and essential ambiguities leave the draft in place.
+
+Only the draft and saved guidance go to the rewrite call. Conversation history
+and attachments are not read. Exact known model IDs use saved profiles; other
+versions use general guidance and are labelled accordingly. Use the skill command
+for an explicit target-model override or guidance refresh.
+
+The button rereads the skill and its model-routing table on every click. To share
+guidance with an existing installation, set the plugin’s optional
+`guidanceDirectory` to that skill folder’s absolute path using
+`claude plugin configure improve-prompt@improve-prompt`. Leave it empty to use
+the bundled copy. Reload plugins after changing configuration.
+
+If another mod hides the button, its AbovePrompt handler must compose the result
+of `await next(e)` with its own controls. A handler that returns without calling
+`next` can hide later mods. Your existing status line can remain visible.
+
+Live rewrite and Undo tests passed in Claude Code CLI 2.1.318 and the desktop
+Code tab using engine 2.1.317. Edits during a pending desktop rewrite were kept.
+Regular Claude chat is outside this mod's scope. No equivalent supported Codex
+composer read/replace API has been verified, so Codex retains the native skill
+picker and copyable rewrite.
+
+To disable the button: `claude plugin disable improve-prompt@improve-prompt`.
+This does not delete the standalone skill or its model guidance.
 
 ## Model guidance and refresh
 
@@ -110,3 +153,10 @@ templates are not bundled. Provider references are linked in each model profile.
 
 MIT licensed. Contributions should preserve intent, keep profiles source-backed,
 and test observable behaviour instead of matching exact output wording.
+
+## Verify the adapter
+
+With Node.js installed, run `node --test tools/tests/improve_prompt_composer.test.mjs`.
+With Claude Code installed, run `claude plugin validate skills/improve-prompt`.
+Neither test command needs an API key. See [VALIDATION.md](VALIDATION.md) for live
+test coverage and its limits.

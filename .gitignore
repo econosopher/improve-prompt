@@ -1,2 +1,5 @@
 .DS_Store
 __pycache__/
+
+**/.claude-plugin/types/
+skills/improve-prompt/tsconfig.json

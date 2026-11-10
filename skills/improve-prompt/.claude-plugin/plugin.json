@@ -1,0 +1,17 @@
+{
+  "name": "improve-prompt",
+  "version": "0.2.1",
+  "description": "Rewrite the current draft in the composer, with Undo and no task submission.",
+  "license": "MIT",
+  "author": {
+    "name": "Phillip Black"
+  },
+  "userConfig": {
+    "guidanceDirectory": {
+      "type": "string",
+      "title": "Shared guidance folder",
+      "description": "Optional absolute path to an existing improve-prompt skill folder. Empty uses the bundled guidance.",
+      "default": ""
+    }
+  }
+}

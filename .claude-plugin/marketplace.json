@@ -1,0 +1,13 @@
+{
+  "name": "improve-prompt",
+  "owner": {
+    "name": "Phillip Black"
+  },
+  "plugins": [
+    {
+      "name": "improve-prompt",
+      "source": "./skills/improve-prompt",
+      "description": "Rewrite an unsent Claude composer draft, with Undo."
+    }
+  ]
+}

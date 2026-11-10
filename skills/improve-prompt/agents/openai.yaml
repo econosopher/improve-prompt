@@ -1,0 +1,6 @@
+interface:
+  display_name: "Improve Prompt"
+  short_description: "Rewrite prompts for the intended model"
+  default_prompt: "Use $improve-prompt to improve this prompt for my current model: "
+policy:
+  allow_implicit_invocation: true

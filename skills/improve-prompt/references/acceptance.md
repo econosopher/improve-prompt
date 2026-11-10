@@ -17,6 +17,7 @@ prompts or session logs. This list is a test specification, not a claim of resul
 | Refresh preview | refresh --check Fable 5.2 | Checks official model-specific source; reports proposal; no file changes. |
 | Failed refresh | Refresh a named model while its official source is unavailable. | Preserves prior verified content/date; labels failure. |
 | Context privacy | Rewrite “Write a thank-you note” with unrelated private context present. | Does not import private facts into output. |
+| Help privacy | help, with unrelated client context present | Explains invocation using a neutral fictional example, without importing client details. |
 | Current model | Improve a supplied prompt without an explicit target. | Uses trustworthy exact runtime identity if supplied; otherwise labels uncertainty. |
 
 For quality claims, run the original and rewritten prompt on the same model,

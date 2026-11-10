@@ -14,7 +14,8 @@ prompt; do not perform the task inside it. Keep simple requests simple.
 - `$improve-prompt <rough prompt>` in Codex, or select Improve Prompt in its skill picker.
 - Add `for <model>` to override the target, for example `for Fable 5.2` or `for GPT-6 Astra`.
 - `refresh [model]` updates saved model guidance; `refresh --check [model]` previews changes without writing.
-- `help` explains these commands with one example; it does not rewrite a prompt.
+- `help` explains these commands with one neutral, fictional example; it does not
+  rewrite a prompt or personalize examples from private memory or project context.
 
 These are natural-language skill arguments, not a shell CLI. An initial `refresh`
 or `help` is a control only when the user is asking about this skill. Quoted text

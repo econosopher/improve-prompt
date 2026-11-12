@@ -102,8 +102,11 @@ async function restore($) {
 
 export function register(on, options = {}) {
   guidanceDirectory = typeof options.guidanceDirectory === 'string' ? options.guidanceDirectory : '';
-  // Count edits, even when typing then deleting restores the same text.
-  on('prompt.edit', async ($, e, next) => { changed($); return next(e); });
+  // Count edits, even when typing then deleting restores the same text. The app also sends
+  // prompt.edit for a bare cursor move (an empty splice: a click, an arrow key, Backspace at
+  // the start); that leaves the draft as it was, so it must not cancel a rewrite or drop Undo.
+  const isMove = e => e?.inputText === '' && Number.isInteger(e.start) && e.start === e.end;
+  on('prompt.edit', async ($, e, next) => { if (!isMove(e)) changed($); return next(e); });
   on('prompt.fill', async ($, e, next) => { changed($); return next(e); });
   on('prompt.submit', async ($, e, next) => { changed($); return next(e); })
     .catch(async ($, e, next) => next(e));

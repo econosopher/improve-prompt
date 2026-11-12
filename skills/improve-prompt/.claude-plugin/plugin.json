@@ -1,6 +1,6 @@
 {
   "name": "improve-prompt",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Rewrite the current draft in the composer, with Undo and no task submission.",
   "license": "MIT",
   "author": {

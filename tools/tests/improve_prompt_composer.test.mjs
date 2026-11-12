@@ -35,7 +35,7 @@ async function host(options = {}) {
     assert.ok(button, `button ${key} present`);
     return button.onPress();
   };
-  const event = async name => hooks.get(name)($, {}, async () => ({}));
+  const event = async (name, e = {}) => hooks.get(name)($, e, async () => ({}));
   const started = async () => { for (let i = 0; i < 100 && !state.calls; i++) await new Promise(r => setTimeout(r, 5)); assert.equal(state.calls, 1); };
   return { state, render, press, event, started, resolve, reject, previous };
 }
@@ -72,6 +72,29 @@ test('late completions cannot overwrite edits, submitted drafts, cancellation, o
     assert.equal(h.state.text, expected);
     assert.equal(h.state.fills, 0);
   });
+});
+
+test('a bare cursor move neither cancels a rewrite nor drops Undo; a real edit still does', async () => {
+  const move = { text: 'x', cursor: 0, start: 3, end: 3, inputText: '' };
+  const h = await host();
+  const done = h.press('improve-draft');
+  await h.started();
+  await h.event('prompt.edit', move);
+  h.resolve(JSON.stringify({ prompt: 'Fix CSV parsing for quoted commas. Do not deploy.', issue: '' }));
+  await done;
+  assert.equal(h.state.text, 'Fix CSV parsing for quoted commas. Do not deploy.');
+  assert.ok(!JSON.stringify(await h.render()).includes('Draft changed'));
+  await h.event('prompt.edit', move);
+  assert.ok(JSON.stringify(await h.render()).includes('undo-improve'));
+  for (const edit of [{ ...move, inputText: 'a' }, { ...move, end: 4 }]) {
+    const g = await host();
+    const late = g.press('improve-draft');
+    await g.started();
+    await g.event('prompt.edit', edit);
+    g.resolve(JSON.stringify({ prompt: 'late rewrite', issue: '' }));
+    await late;
+    assert.equal(g.state.fills, 0);
+  }
 });
 
 test('invalid, ambiguous, failed and rejected results preserve the draft', async t => {

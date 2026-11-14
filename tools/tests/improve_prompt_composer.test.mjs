@@ -12,7 +12,7 @@ async function host(options = {}) {
     hooks.set(name, fn ?? matcher);
     return { catch() {} };
   }, options);
-  const state = { text: 'fix quoted commas in the CSV parser. do not deploy', model: 'claude-fable-5-2', calls: 0, fills: 0, accept: true };
+  const state = { text: 'fix quoted commas in the CSV parser. do not deploy', model: 'claude-fable-5-2', calls: 0, fills: 0, accept: true, invalidations: 0 };
   let resolve, reject;
   const request = new Promise((a, b) => { resolve = a; reject = b; });
   const previous = { type: 'OtherMod' };
@@ -26,18 +26,30 @@ async function host(options = {}) {
       fill: async ({ text }) => { state.fills++; if (state.accept) state.text = text; return { isFilled: state.accept, text: state.text }; },
       submit: () => { throw new Error('Must never submit the draft'); },
     },
-    ui: { invalidate() {}, toast() {}, resolve: () => Object.fromEntries(['Box', 'Text', 'Button'].map(type => [type, props => ({ type, ...props })])) },
+    ui: { invalidate() { state.invalidations++; }, toast() {}, resolve: () => Object.fromEntries(['Box', 'Text', 'Button'].map(type => [type, props => ({ type, ...props })])) },
   };
   const render = async (props = {}) => hooks.get('ui.render')($, { props }, async () => previous);
   const find = (tree, key) => tree.key === key ? tree : tree.children?.map(child => find(child, key)).find(Boolean);
+  // Improve's onPress returns at once (the rewrite runs on); wait for the band to show
+  // Improve again, which is when the rewrite has settled.
+  const idle = async () => {
+    for (let i = 0; i < 400; i++) {
+      if (find(await render(), 'improve-draft')) return;
+      await new Promise(r => setTimeout(r, 5));
+    }
+    assert.fail('rewrite did not settle');
+  };
   const press = async key => {
     const button = find(await render(), key);
     assert.ok(button, `button ${key} present`);
-    return button.onPress();
+    const result = button.onPress();
+    if (key !== 'improve-draft') return result;
+    assert.equal(result, undefined, 'Improve press returns at once');
+    return idle();
   };
   const event = async (name, e = {}) => hooks.get(name)($, e, async () => ({}));
   const started = async () => { for (let i = 0; i < 100 && !state.calls; i++) await new Promise(r => setTimeout(r, 5)); assert.equal(state.calls, 1); };
-  return { state, render, press, event, started, resolve, reject, previous };
+  return { state, $, render, press, event, started, idle, resolve, reject, previous, find };
 }
 
 test('button replaces draft without submitting; Undo restores exact original; other mods remain visible', async () => {
@@ -120,11 +132,11 @@ test('Undo cannot overwrite intervening edits; duplicate clicks start one reques
   const h = await host();
   const tree = await h.render();
   const button = tree.children[1].children[0];
-  const done = button.onPress();
-  await button.onPress();
+  button.onPress();
+  button.onPress();
   await h.started();
   h.resolve(JSON.stringify({ prompt: 'New draft', issue: '' }));
-  await done;
+  await h.idle();
   const rendered = await h.render();
   const undo = rendered.children[1].children.find(x => x.key === 'undo-improve');
   h.state.text = 'New draft plus user edits';
@@ -154,4 +166,32 @@ test('configured shared guidance follows refreshed exact-model routing on every 
   h.state.model = 'future-model-2';
   await h.press('improve-draft');
   assert.ok(!h.state.request.system.includes('REFRESHED PROFILE MARKER'));
+});
+
+test('the band holds still: typing with nothing to clear does not redraw, and Improve stays live mid-turn', async () => {
+  const h = await host();
+  await h.render();
+  for (let i = 0; i < 5; i++) await h.event('prompt.edit', { text: 'x', cursor: 1, start: 0, end: 0, inputText: 'x' });
+  await h.event('prompt.submit');
+  assert.equal(h.state.invalidations, 0);
+  const working = await h.render({ isWorking: true });
+  const idle = await h.render({ isWorking: false });
+  assert.equal(JSON.stringify(working), JSON.stringify(idle));
+  assert.ok(!h.find(working, 'improve-draft').disabled);
+});
+
+test('a late Cancel press and a failing Undo keep the draft and never throw', async () => {
+  const h = await host();
+  const tree = await h.render();
+  h.press('improve-draft');
+  await h.started();
+  const cancel = h.find(await h.render(), 'cancel-improve');
+  h.resolve(JSON.stringify({ prompt: 'New draft', issue: '' }));
+  await h.idle();
+  assert.doesNotThrow(() => cancel.onPress());
+  const undo = h.find(await h.render(), 'undo-improve');
+  h.$.prompt.read = async () => { throw new Error('composer gone'); };
+  await undo.onPress();
+  assert.ok(JSON.stringify(await h.render()).includes('Could not restore the draft.'));
+  assert.ok(tree);
 });

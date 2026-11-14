@@ -5,15 +5,19 @@ let revision = 0;
 let notice = '';
 let guidanceDirectory = '';
 const redraw = $ => $.ui.invalidate('ui.render');
+// Redraw only when the band would look different. A redraw that changes the tree hands
+// the surface new button handles, and a click on an older drawing is dropped by the
+// engine ("ui_press not handled"); an identical redraw keeps them, so this only saves work.
 const changed = $ => {
   revision += 1;
+  const visible = Boolean(notice || undo || pending);
   notice = '';
   if (pending) {
     pending.cancelled = true;
     notice = 'Draft changed; rewrite will not replace it.';
   }
   undo = null;
-  redraw($);
+  if (visible) redraw($);
 };
 
 async function improve($) {
@@ -21,8 +25,8 @@ async function improve($) {
   const job = { cancelled: false, revision };
   pending = job;
   notice = '';
-  redraw($);
   try {
+    redraw($);
     const original = (await $.prompt.read()).text;
     if (!original.trim()) { notice = 'Type a prompt first.'; return; }
     if (original.length > 24000) { notice = 'Draft is too long for this button (24,000 characters).'; return; }
@@ -88,14 +92,18 @@ async function improve($) {
 async function restore($) {
   const saved = undo;
   if (!saved || pending) return;
-  const current = await $.prompt.read();
-  if (undo !== saved || revision !== saved.revision || current.text !== saved.replacement) {
-    undo = null;
-    notice = 'Draft changed; Undo will not overwrite your edits.';
-  } else {
-    const filled = await $.prompt.fill({ text: saved.original, mode: 'replace' });
-    notice = filled.isFilled && filled.text === saved.original ? '' : 'Could not restore the draft.';
-    if (filled.isFilled) undo = null;
+  try {
+    const current = await $.prompt.read();
+    if (undo !== saved || revision !== saved.revision || current.text !== saved.replacement) {
+      undo = null;
+      notice = 'Draft changed; Undo will not overwrite your edits.';
+    } else {
+      const filled = await $.prompt.fill({ text: saved.original, mode: 'replace' });
+      notice = filled.isFilled && filled.text === saved.original ? '' : 'Could not restore the draft.';
+      if (filled.isFilled) undo = null;
+    }
+  } catch {
+    notice = 'Could not restore the draft.';
   }
   redraw($);
 }
@@ -118,13 +126,16 @@ export function register(on, options = {}) {
     const buttons = pending ? [
       Button({ key: 'cancel-improve', label: pending.cancelled ? 'Cancelling…' : 'Cancel rewrite',
         plain: true, dimColor: true, disabled: pending.cancelled, onPress: () => {
-        pending.cancelled = true;
+        if (pending) pending.cancelled = true;
         notice = '';
         redraw($);
       } }),
     ] : [
-      Button({ key: 'improve-draft', label: 'Improve', plain: true, dimColor: true, disabled: e.props.isWorking,
-        onPress: () => improve($) }),
+      // No `disabled`: Button has no such prop in this engine, so it was never drawn. The
+      // press returns at once so the surface gets the Cancel drawing now, not after the
+      // whole rewrite settles.
+      Button({ key: 'improve-draft', label: 'Improve', plain: true, dimColor: true,
+        onPress: () => { improve($).catch(() => {}); } }),
       ...(undo ? [Button({ key: 'undo-improve', label: 'Undo', plain: true, dimColor: true, onPress: () => restore($) })] : []),
     ];
     return Box({ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 1, children: [

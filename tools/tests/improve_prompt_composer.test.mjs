@@ -17,7 +17,7 @@ async function host(options = {}) {
   const request = new Promise((a, b) => { resolve = a; reject = b; });
   const previous = { type: 'OtherMod' };
   const $ = {
-    plugin: { root: new URL('../../skills/improve-prompt', import.meta.url).pathname },
+    plugin: { name: 'improve-prompt', root: new URL('../../skills/improve-prompt', import.meta.url).pathname },
     fs: { read: path => readFile(path, 'utf8') },
     model: { complete: async input => { state.calls++; state.request = input; return { isAnswered: true, text: await request }; } },
     session: { model: async () => state.model },
@@ -47,9 +47,16 @@ async function host(options = {}) {
     assert.equal(result, undefined, 'Improve press returns at once');
     return idle();
   };
-  const event = async (name, e = {}) => hooks.get(name)($, e, async () => ({}));
+  // The engine's own step: prompt.edit applies the splice to the draft and answers the box.
+  const core = async e => {
+    if (!Number.isInteger(e.start)) return {};
+    state.text = e.text.slice(0, e.start) + e.inputText + e.text.slice(e.end);
+    return { text: state.text, cursor: e.start + e.inputText.length };
+  };
+  const event = async (name, e = {}, next = core) => hooks.has(name) ? hooks.get(name)($, e, next) : next(e);
+  const edit = (start, end, inputText) => event('prompt.edit', { origin: { kind: 'composer' }, text: state.text, cursor: start, start, end, inputText });
   const started = async () => { for (let i = 0; i < 100 && !state.calls; i++) await new Promise(r => setTimeout(r, 5)); assert.equal(state.calls, 1); };
-  return { state, $, render, press, event, started, idle, resolve, reject, previous, find };
+  return { state, $, render, press, event, edit, started, idle, resolve, reject, previous, find };
 }
 
 test('button replaces draft without submitting; Undo restores exact original; other mods remain visible', async () => {
@@ -73,9 +80,9 @@ test('late completions cannot overwrite edits, submitted drafts, cancellation, o
     const h = await host(), original = h.state.text;
     const done = h.press('improve-draft');
     await h.started();
-    if (reason === 'edit-and-restore') await h.event('prompt.edit');
-    if (reason === 'other-fill') { h.state.text = 'new draft'; await h.event('prompt.fill'); }
-    if (reason === 'submit') { h.state.text = ''; await h.event('prompt.submit'); }
+    if (reason === 'edit-and-restore') { await h.edit(0, 0, 'a'); await h.edit(0, 1, ''); }
+    if (reason === 'other-fill') { h.state.text = 'new draft'; await h.event('prompt.change', { text: 'new draft', cursor: 9, origin: { kind: 'plugin', name: 'other-mod' } }); }
+    if (reason === 'submit') { h.state.text = ''; await h.event('prompt.change', { text: '', cursor: 0, origin: { kind: 'clear' } }); }
     if (reason === 'cancel') await h.press('cancel-improve');
     if (reason === 'model') h.state.model = 'different-model';
     const expected = h.state.text;
@@ -86,23 +93,12 @@ test('late completions cannot overwrite edits, submitted drafts, cancellation, o
   });
 });
 
-test('a bare cursor move neither cancels a rewrite nor drops Undo; a real edit still does', async () => {
-  const move = { text: 'x', cursor: 0, start: 3, end: 3, inputText: '' };
-  const h = await host();
-  const done = h.press('improve-draft');
-  await h.started();
-  await h.event('prompt.edit', move);
-  h.resolve(JSON.stringify({ prompt: 'Fix CSV parsing for quoted commas. Do not deploy.', issue: '' }));
-  await done;
-  assert.equal(h.state.text, 'Fix CSV parsing for quoted commas. Do not deploy.');
-  assert.ok(!JSON.stringify(await h.render()).includes('Draft changed'));
-  await h.event('prompt.edit', move);
-  assert.ok(JSON.stringify(await h.render()).includes('undo-improve'));
-  for (const edit of [{ ...move, inputText: 'a' }, { ...move, end: 4 }]) {
+test('a real insertion or deletion still cancels a late rewrite', async () => {
+  for (const [start, end, text] of [[3, 3, 'a'], [3, 4, '']]) {
     const g = await host();
     const late = g.press('improve-draft');
     await g.started();
-    await g.event('prompt.edit', edit);
+    await g.edit(start, end, text);
     g.resolve(JSON.stringify({ prompt: 'late rewrite', issue: '' }));
     await late;
     assert.equal(g.state.fills, 0);
@@ -139,8 +135,7 @@ test('Undo cannot overwrite intervening edits; duplicate clicks start one reques
   await h.idle();
   const rendered = await h.render();
   const undo = rendered.children[1].children.find(x => x.key === 'undo-improve');
-  h.state.text = 'New draft plus user edits';
-  await h.event('prompt.edit');
+  await h.edit(9, 9, ' plus user edits');
   await undo.onPress();
   assert.equal(h.state.text, 'New draft plus user edits');
   assert.equal(h.state.calls, 1);
@@ -171,8 +166,8 @@ test('configured shared guidance follows refreshed exact-model routing on every 
 test('the band holds still: typing with nothing to clear does not redraw, and Improve stays live mid-turn', async () => {
   const h = await host();
   await h.render();
-  for (let i = 0; i < 5; i++) await h.event('prompt.edit', { text: 'x', cursor: 1, start: 0, end: 0, inputText: 'x' });
-  await h.event('prompt.submit');
+  for (let i = 0; i < 5; i++) await h.edit(0, 0, 'x');
+  await h.event('prompt.change', { text: '', cursor: 0, origin: { kind: 'clear' } });
   assert.equal(h.state.invalidations, 0);
   const working = await h.render({ isWorking: true });
   const idle = await h.render({ isWorking: false });
@@ -194,4 +189,57 @@ test('a late Cancel press and a failing Undo keep the draft and never throw', as
   await undo.onPress();
   assert.ok(JSON.stringify(await h.render()).includes('Could not restore the draft.'));
   assert.ok(tree);
+});
+
+test('nothing that leaves the draft text alone cancels a rewrite or drops Undo', async t => {
+  const same = h => [
+    ['cursor move', () => h.edit(3, 3, '')],
+    ['selection retyped as itself', () => h.edit(0, 3, h.state.text.slice(0, 3))],
+    ['whole draft resynced', () => h.edit(0, h.state.text.length, h.state.text)],
+    ['key consumed by another mod', () => h.event('prompt.edit', { text: h.state.text, cursor: 0, start: 0, end: 0, inputText: 'z' },
+      async e => ({ text: e.text, cursor: e.cursor }))],
+    ['task notification, trigger or peer message', () => h.event('prompt.submit', { text: 'background', origin: { kind: 'task-notification' } })],
+    ['this mod\'s own fill landing', () => h.event('prompt.change', { text: h.state.text, cursor: 0, origin: { kind: 'plugin', name: 'improve-prompt' } })],
+  ];
+  for (const [name] of same({})) await t.test(name, async () => {
+    const h = await host();
+    const run = same(h).find(([n]) => n === name)[1];
+    const done = h.press('improve-draft');
+    await h.started();
+    await run();
+    h.resolve(JSON.stringify({ prompt: 'Fix CSV parsing for quoted commas. Do not deploy.', issue: '' }));
+    await done;
+    assert.equal(h.state.text, 'Fix CSV parsing for quoted commas. Do not deploy.');
+    await run();
+    const band = JSON.stringify(await h.render());
+    assert.ok(!band.includes('Draft changed'), band);
+    assert.ok(band.includes('undo-improve'));
+  });
+});
+
+test('an edit still in the prompt.edit chain when the rewrite lands keeps the draft', async () => {
+  const h = await host();
+  const done = h.press('improve-draft');
+  await h.started();
+  let release;
+  const gate = new Promise(r => { release = r; });
+  const edit = h.event('prompt.edit', { text: h.state.text, cursor: 0, start: 0, end: 0, inputText: 'a' },
+    async e => { await gate; h.state.text = 'a' + e.text; return { text: h.state.text, cursor: 1 }; });
+  h.resolve(JSON.stringify({ prompt: 'late rewrite', issue: '' }));
+  await new Promise(r => setTimeout(r, 30));
+  release();
+  await edit;
+  await done;
+  assert.equal(h.state.fills, 0);
+  assert.ok(h.state.text.startsWith('a'));
+});
+
+test('this mod\'s own fill is recognised by its text when the engine names it otherwise', async () => {
+  const h = await host();
+  const done = h.press('improve-draft');
+  await h.started();
+  h.resolve(JSON.stringify({ prompt: 'Fix CSV parsing for quoted commas. Do not deploy.', issue: '' }));
+  await done;
+  await h.event('prompt.change', { text: h.state.text, cursor: 0, origin: { kind: 'plugin', name: 'improve-prompt@improve-prompt' } });
+  assert.ok(JSON.stringify(await h.render()).includes('undo-improve'));
 });

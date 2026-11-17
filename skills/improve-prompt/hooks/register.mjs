@@ -4,6 +4,13 @@ let undo = null;
 let revision = 0;
 let notice = '';
 let guidanceDirectory = '';
+// The text this mod last put in the box, to tell its own fill's prompt.change by, should
+// the engine name the filling plugin differently from $.plugin.name.
+let ownFill = null;
+// Edits still running through the prompt.edit chain. A change counts once the chain says
+// the text moved, so a rewrite or Undo waits for these before its last look at the draft.
+const editing = new Set();
+const settled = () => Promise.all([...editing]);
 const redraw = $ => $.ui.invalidate('ui.render');
 // Redraw only when the band would look different. A redraw that changes the tree hands
 // the surface new button handles, and a click on an older drawing is dropped by the
@@ -68,11 +75,13 @@ async function improve($) {
     const replacement = result.prompt.trim();
     if (!replacement || replacement.length > 48000) { notice = 'Rewrite was empty or too long; draft kept.'; return; }
     if (await $.session.model() !== model) { notice = 'Model changed; draft kept. Try again.'; return; }
+    await settled();
     const current = await $.prompt.read();
     if (job.cancelled || revision !== job.revision || current.text !== original) {
       notice = 'Draft changed; rewrite discarded.'; return;
     }
     if (replacement === original) { notice = 'Already clear; draft kept.'; return; }
+    ownFill = replacement;
     const filled = await $.prompt.fill({ text: replacement, mode: 'replace' });
     if (!filled.isFilled || filled.text !== replacement) {
       notice = 'Composer could not accept the rewrite.'; return;
@@ -93,11 +102,13 @@ async function restore($) {
   const saved = undo;
   if (!saved || pending) return;
   try {
+    await settled();
     const current = await $.prompt.read();
     if (undo !== saved || revision !== saved.revision || current.text !== saved.replacement) {
       undo = null;
       notice = 'Draft changed; Undo will not overwrite your edits.';
     } else {
+      ownFill = saved.original;
       const filled = await $.prompt.fill({ text: saved.original, mode: 'replace' });
       notice = filled.isFilled && filled.text === saved.original ? '' : 'Could not restore the draft.';
       if (filled.isFilled) undo = null;
@@ -110,14 +121,33 @@ async function restore($) {
 
 export function register(on, options = {}) {
   guidanceDirectory = typeof options.guidanceDirectory === 'string' ? options.guidanceDirectory : '';
-  // Count edits, even when typing then deleting restores the same text. The app also sends
-  // prompt.edit for a bare cursor move (an empty splice: a click, an arrow key, Backspace at
-  // the start); that leaves the draft as it was, so it must not cancel a rewrite or drop Undo.
-  const isMove = e => e?.inputText === '' && Number.isInteger(e.start) && e.start === e.end;
-  on('prompt.edit', async ($, e, next) => { if (!isMove(e)) changed($); return next(e); });
-  on('prompt.fill', async ($, e, next) => { changed($); return next(e); });
-  on('prompt.submit', async ($, e, next) => { changed($); return next(e); })
-    .catch(async ($, e, next) => next(e));
+  // A change is the draft's text changing, nothing else. Judge it by text, never by the
+  // event's shape: the app also sends prompt.edit for cursor moves, selections and keys
+  // that leave the text as it was, and prompt.submit for task notifications, scheduled
+  // triggers and peer messages that never touch the draft. Each of those used to cancel a
+  // rewrite or drop Undo with a false "Draft changed". Typing then deleting still counts:
+  // each of those edits changes the text.
+  on('prompt.edit', ($, e, next) => {
+    const run = (async () => {
+      const box = await next(e);
+      const after = typeof box?.text === 'string' ? box.text
+        : typeof e?.text === 'string' && Number.isInteger(e.start) && Number.isInteger(e.end)
+          ? e.text.slice(0, e.start) + (e.inputText ?? '') + e.text.slice(e.end) : e?.text;
+      if (after !== e?.text) changed($);
+      return box;
+    })();
+    const tracked = run.catch(() => {}).finally(() => editing.delete(tracked));
+    editing.add(tracked);
+    return run;
+  });
+  // Every other text change (history recall, a clear after a send, chat:undo, another
+  // plugin's fill) arrives here once it has landed. Our own fill is the rewrite and Undo
+  // landing, which improve() and restore() already account for.
+  on('prompt.change', async ($, e, next) => {
+    const own = e?.origin?.kind === 'plugin' && (e.origin.name === $.plugin.name || e.text === ownFill);
+    if (!own) changed($);
+    return next(e);
+  });
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const previous = await next(e);

@@ -83,7 +83,8 @@ applies. Typing or sending while a rewrite runs discards its result. **Cancel
 rewrite** keeps the draft but does not cancel provider billing for the request.
 Failures and essential ambiguities leave the draft in place. If the draft changes while a rewrite runs without the
 app reporting an edit, the rewrite is held and **Replace anyway** applies it;
-Undo then restores the draft as it was just before.
+Undo then restores the draft as it was just before. The same applies when the box reads empty
+because you switched chats during the rewrite.
 
 Only the draft and saved guidance go to the rewrite call. Conversation history
 and attachments are not read. Exact known model IDs use saved profiles; other

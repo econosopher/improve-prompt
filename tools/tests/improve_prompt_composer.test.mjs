@@ -346,14 +346,31 @@ test('a real edit after a held rewrite withdraws Replace anyway', async () => {
   assert.ok(!JSON.stringify(await h.render()).includes('replace-anyway'));
 });
 
-test('a draft sent or cleared with no event discards the rewrite instead of offering Replace anyway', async () => {
+test('an empty read with no event (chat switched away) holds the rewrite for Replace anyway', async () => {
+  const h = await host(), original = h.state.text;
+  const done = h.press('improve-draft');
+  await h.started();
+  const read = h.$.prompt.read;
+  h.$.prompt.read = async () => ({ text: '', cursor: 0 });
+  h.resolve(JSON.stringify({ prompt: 'Rewritten.', issue: '' }));
+  await done;
+  assert.equal(h.state.text, original);
+  assert.ok(JSON.stringify(await h.render()).includes('replace-anyway'));
+  h.$.prompt.read = read;
+  await h.press('replace-anyway');
+  assert.equal(h.state.text, 'Rewritten.');
+  await h.press('undo-improve');
+  assert.equal(h.state.text, original);
+});
+
+test('Replace anyway into a box that really is empty drops the rewrite', async () => {
   const h = await host();
   const done = h.press('improve-draft');
   await h.started();
   h.state.text = '';
   h.resolve(JSON.stringify({ prompt: 'Rewritten.', issue: '' }));
   await done;
+  await h.press('replace-anyway');
   assert.equal(h.state.text, '');
-  const band = JSON.stringify(await h.render());
-  assert.ok(!band.includes('replace-anyway') && band.includes('sent or cleared'), band);
+  assert.ok(JSON.stringify(await h.render()).includes('rewrite dropped'));
 });

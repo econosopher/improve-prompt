@@ -124,8 +124,11 @@ async function improve($) {
         { ms: ms(), cancelled: job.cancelled, revMoved: revision !== job.revision }); return;
     }
     if (!current.text.trim()) {
-      // Sent or cleared while rewriting, unreported: the draft is gone, so is the rewrite.
-      say($, 'draft-cleared', 'Draft was sent or cleared; rewrite discarded.', { ms: ms(), origLen: original.length }); return;
+      // The box read empty with no event. Watch logs show this when you switch chats while
+      // the rewrite runs and the draft is intact on return, so keep it; a real send or
+      // clear reports a change and withdraws it.
+      held = { replacement, revision };
+      say($, 'draft-unreachable', 'Rewrite ready.', { ms: ms(), origLen: original.length }); return;
     }
     if (current.text !== original && squash(current.text) !== squash(original)) {
       // The text moved but no edit reached this mod (the app does not always report one).
@@ -175,7 +178,8 @@ async function replaceAnyway($) {
   try {
     await settled();
     const current = await $.prompt.read();
-    await put($, current.text, saved.replacement, 'replaced-anyway');
+    if (!current.text.trim()) { say($, 'replace-empty', 'The draft is empty; rewrite dropped.'); }
+    else await put($, current.text, saved.replacement, 'replaced-anyway');
   } catch (err) {
     say($, 'replace-failed', 'Composer could not accept the rewrite.', { error: typeof err?.name === 'string' ? err.name.slice(0, 40) : typeof err });
   }

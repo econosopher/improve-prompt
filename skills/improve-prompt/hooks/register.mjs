@@ -7,15 +7,48 @@ let guidanceDirectory = '';
 // The text this mod last put in the box, to tell its own fill's prompt.change by, should
 // the engine name the filling plugin differently from $.plugin.name.
 let ownFill = null;
+// The draft text as last seen. prompt.change counts only when its text differs from this,
+// so a resync that repeats the text is not mistaken for an edit.
+let known = null;
 // Edits still running through the prompt.edit chain. A change counts once the chain says
 // the text moved, so a rewrite or Undo waits for these before its last look at the draft.
 const editing = new Set();
 const settled = () => Promise.all([...editing]);
 const redraw = $ => $.ui.invalidate('ui.render');
+// Opt-in diagnostics: outcome codes and timings only, never draft, reply or error text.
+// On only when $HOME/Library/Logs/improve-prompt exists; one file per running session.
+const events = [];
+let logFile;
+let writing = Promise.resolve();
+const sessionTag = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+function log($, ev, data = {}) {
+  try {
+    events.push(JSON.stringify({ t: new Date().toISOString(), ev, ...data }));
+    if (events.length > 300) events.splice(0, events.length - 300);
+    writing = writing.then(async () => {
+      if (logFile === undefined) {
+        const home = await $.env.get('HOME');
+        const dir = home && `${home}/Library/Logs/improve-prompt`;
+        logFile = dir && await $.fs.exists(dir) ? `${dir}/session-${sessionTag}.jsonl` : null;
+      }
+      if (logFile) await $.fs.write(logFile, events.join('\n') + '\n');
+    }).catch(() => { logFile = null; });
+  } catch { /* diagnostics must never break the button */ }
+}
+const say = ($, code, text, data) => { notice = text; log($, code, data); };
+// A reply wrapped in fences or a sentence is still usable: take the outermost JSON object.
+function parseReply(text) {
+  if (typeof text !== 'string') return null;
+  try { return JSON.parse(text); } catch {}
+  const a = text.indexOf('{'), b = text.lastIndexOf('}');
+  if (a < 0 || b <= a) return null;
+  try { return JSON.parse(text.slice(a, b + 1)); } catch { return null; }
+}
 // Redraw only when the band would look different. A redraw that changes the tree hands
 // the surface new button handles, and a click on an older drawing is dropped by the
 // engine ("ui_press not handled"); an identical redraw keeps them, so this only saves work.
-const changed = $ => {
+const changed = ($, why) => {
+  log($, 'changed', { why, pending: Boolean(pending), undo: Boolean(undo) });
   revision += 1;
   const visible = Boolean(notice || undo || pending);
   notice = '';
@@ -32,11 +65,15 @@ async function improve($) {
   const job = { cancelled: false, revision };
   pending = job;
   notice = '';
+  const started = Date.now();
+  const ms = () => Date.now() - started;
+  log($, 'press');
   try {
     redraw($);
     const original = (await $.prompt.read()).text;
-    if (!original.trim()) { notice = 'Type a prompt first.'; return; }
-    if (original.length > 24000) { notice = 'Draft is too long for this button (24,000 characters).'; return; }
+    known = original;
+    if (!original.trim()) { say($, 'empty-draft', 'Type a prompt first.'); return; }
+    if (original.length > 24000) { say($, 'too-long', 'Draft is too long for this button (24,000 characters).'); return; }
     const model = await $.session.model();
     const root = guidanceDirectory || $.plugin.root;
     const skill = await $.fs.read(`${root}/SKILL.md`);
@@ -46,7 +83,7 @@ async function improve($) {
       line.split('|')[1]?.includes('`' + model + '`'));
     const file = row?.match(/`references\/([a-zA-Z0-9._-]+\.md)`/)?.[1];
     const profile = file ? await $.fs.read(`${root}/references/${file}`) : '';
-    if (job.cancelled) return;
+    if (job.cancelled) { log($, 'cancelled-before-call'); return; }
     const reply = await $.model.complete({
       model,
       maxTokens: 16000,
@@ -63,35 +100,39 @@ async function improve($) {
         '{"prompt":"","issue":"brief question or explanation"}. No fences, preamble or change notes.',
       prompt: JSON.stringify({ activeModel: model, draft: original }),
     });
-    if (job.cancelled || revision !== job.revision) return;
-    const text = typeof reply === "string" ? reply : reply?.isAnswered === true ? reply.text : null;
-    let result;
-    try { result = JSON.parse(text); }
-    catch { notice = 'Rewrite returned an invalid result; draft kept.'; return; }
+    if (job.cancelled || revision !== job.revision) { log($, 'discarded-late', { ms: ms(), cancelled: job.cancelled }); return; }
+    const answered = typeof reply === 'string' || reply?.isAnswered === true;
+    const text = typeof reply === 'string' ? reply : answered ? reply.text : null;
+    const result = parseReply(text);
     if (!result || typeof result.prompt !== 'string' || typeof result.issue !== 'string') {
-      notice = 'Rewrite returned an invalid result; draft kept.'; return;
+      say($, 'invalid-reply', 'Rewrite returned an invalid result; draft kept.',
+        { ms: ms(), answered, chars: typeof text === 'string' ? text.length : -1, parsed: Boolean(result) }); return;
     }
-    if (result.issue) { notice = result.issue.slice(0, 400); return; }
+    if (result.issue) { say($, 'issue', result.issue.slice(0, 400), { ms: ms() }); return; }
     const replacement = result.prompt.trim();
-    if (!replacement || replacement.length > 48000) { notice = 'Rewrite was empty or too long; draft kept.'; return; }
-    if (await $.session.model() !== model) { notice = 'Model changed; draft kept. Try again.'; return; }
+    if (!replacement || replacement.length > 48000) { say($, 'empty-or-long', 'Rewrite was empty or too long; draft kept.', { ms: ms() }); return; }
+    if (await $.session.model() !== model) { say($, 'model-changed', 'Model changed; draft kept. Try again.', { ms: ms() }); return; }
     await settled();
     const current = await $.prompt.read();
     if (job.cancelled || revision !== job.revision || current.text !== original) {
-      notice = 'Draft changed; rewrite discarded.'; return;
+      say($, 'draft-changed', 'Draft changed; rewrite discarded.',
+        { ms: ms(), cancelled: job.cancelled, revMoved: revision !== job.revision, textMoved: current.text !== original }); return;
     }
-    if (replacement === original) { notice = 'Already clear; draft kept.'; return; }
+    if (replacement === original) { say($, 'already-clear', 'Already clear; draft kept.', { ms: ms() }); return; }
     ownFill = replacement;
     const filled = await $.prompt.fill({ text: replacement, mode: 'replace' });
     if (!filled.isFilled || filled.text !== replacement) {
-      notice = 'Composer could not accept the rewrite.'; return;
+      say($, 'fill-refused', 'Composer could not accept the rewrite.', { ms: ms(), isFilled: Boolean(filled.isFilled) }); return;
     }
+    known = replacement;
     undo = { original, replacement, revision };
     notice = '';
+    log($, 'improved', { ms: ms(), profile: Boolean(file) });
     $.ui.toast(`Improved for ${model}${file ? '': ' (general guidance)'}. Review before sending.`, { timeoutMs: 4000 });
-  } catch {
-    // Provider errors can contain request text. Keep them out of the UI/logs.
-    notice = 'Rewrite failed; draft kept. Check your model connection and try again.';
+  } catch (err) {
+    // Provider errors can contain request text. Keep them out of the UI/logs: name only.
+    say($, 'failed', 'Rewrite failed; draft kept. Check your model connection and try again.',
+      { ms: ms(), error: typeof err?.name === 'string' ? err.name.slice(0, 40) : typeof err });
   } finally {
     if (pending === job) pending = null;
     redraw($);
@@ -106,15 +147,17 @@ async function restore($) {
     const current = await $.prompt.read();
     if (undo !== saved || revision !== saved.revision || current.text !== saved.replacement) {
       undo = null;
-      notice = 'Draft changed; Undo will not overwrite your edits.';
+      say($, 'undo-blocked', 'Draft changed; Undo will not overwrite your edits.');
     } else {
       ownFill = saved.original;
       const filled = await $.prompt.fill({ text: saved.original, mode: 'replace' });
-      notice = filled.isFilled && filled.text === saved.original ? '' : 'Could not restore the draft.';
+      const ok = filled.isFilled && filled.text === saved.original;
+      if (ok) { notice = ''; known = saved.original; log($, 'undone'); }
+      else say($, 'undo-fill-refused', 'Could not restore the draft.');
       if (filled.isFilled) undo = null;
     }
-  } catch {
-    notice = 'Could not restore the draft.';
+  } catch (err) {
+    say($, 'undo-failed', 'Could not restore the draft.', { error: typeof err?.name === 'string' ? err.name.slice(0, 40) : typeof err });
   }
   redraw($);
 }
@@ -133,7 +176,8 @@ export function register(on, options = {}) {
       const after = typeof box?.text === 'string' ? box.text
         : typeof e?.text === 'string' && Number.isInteger(e.start) && Number.isInteger(e.end)
           ? e.text.slice(0, e.start) + (e.inputText ?? '') + e.text.slice(e.end) : e?.text;
-      if (after !== e?.text) changed($);
+      if (typeof after === 'string') known = after;
+      if (after !== e?.text) changed($, 'edit');
       return box;
     })();
     const tracked = run.catch(() => {}).finally(() => editing.delete(tracked));
@@ -144,8 +188,13 @@ export function register(on, options = {}) {
   // plugin's fill) arrives here once it has landed. Our own fill is the rewrite and Undo
   // landing, which improve() and restore() already account for.
   on('prompt.change', async ($, e, next) => {
-    const own = e?.origin?.kind === 'plugin' && (e.origin.name === $.plugin.name || e.text === ownFill);
-    if (!own) changed($);
+    // Ours whatever origin the engine gives it: the text this mod just wrote, or our name.
+    const own = (ownFill !== null && e?.text === ownFill) ||
+      (e?.origin?.kind === 'plugin' && e.origin.name === $.plugin.name);
+    const same = typeof e?.text === 'string' && known !== null && e.text === known;
+    if (own || same) log($, own ? 'own-fill' : 'resync', { origin: String(e?.origin?.kind ?? '') });
+    else changed($, `change:${String(e?.origin?.kind ?? '').slice(0, 30)}`);
+    if (typeof e?.text === 'string') known = e.text;
     return next(e);
   });
 
@@ -156,6 +205,7 @@ export function register(on, options = {}) {
     const buttons = pending ? [
       Button({ key: 'cancel-improve', label: pending.cancelled ? 'Cancelling…' : 'Cancel rewrite',
         plain: true, dimColor: true, disabled: pending.cancelled, onPress: () => {
+        log($, 'cancel-press', { live: Boolean(pending) });
         if (pending) pending.cancelled = true;
         notice = '';
         redraw($);

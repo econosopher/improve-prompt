@@ -243,3 +243,64 @@ test('this mod\'s own fill is recognised by its text when the engine names it ot
   await h.event('prompt.change', { text: h.state.text, cursor: 0, origin: { kind: 'plugin', name: 'improve-prompt@improve-prompt' } });
   assert.ok(JSON.stringify(await h.render()).includes('undo-improve'));
 });
+
+test('a prompt.change that repeats the draft text is a resync, not an edit', async () => {
+  const h = await host();
+  const done = h.press('improve-draft');
+  await h.started();
+  await h.event('prompt.change', { text: h.state.text, cursor: 0, origin: { kind: 'composer' } });
+  h.resolve(JSON.stringify({ prompt: 'Fix CSV parsing for quoted commas. Do not deploy.', issue: '' }));
+  await done;
+  assert.equal(h.state.text, 'Fix CSV parsing for quoted commas. Do not deploy.');
+  await h.event('prompt.change', { text: h.state.text, cursor: 0, origin: { kind: 'sync' } });
+  const band = JSON.stringify(await h.render());
+  assert.ok(band.includes('undo-improve') && !band.includes('Draft changed'), band);
+});
+
+test('this mod\'s own fill keeps Undo whatever origin kind the engine reports', async t => {
+  for (const origin of [undefined, { kind: 'composer' }, { kind: 'fill' }]) await t.test(String(origin?.kind), async () => {
+    const h = await host();
+    const done = h.press('improve-draft');
+    await h.started();
+    h.resolve(JSON.stringify({ prompt: 'Fix CSV parsing for quoted commas. Do not deploy.', issue: '' }));
+    await done;
+    await h.event('prompt.change', { text: h.state.text, cursor: 0, origin });
+    assert.ok(JSON.stringify(await h.render()).includes('undo-improve'));
+  });
+});
+
+test('a fenced or prefaced JSON reply is still applied', async t => {
+  for (const wrap of [s => '```json\n' + s + '\n```', s => 'Here it is:\n' + s]) await t.test(wrap('x').slice(0, 8), async () => {
+    const h = await host();
+    const done = h.press('improve-draft');
+    await h.started();
+    h.resolve(wrap(JSON.stringify({ prompt: 'Fenced result.', issue: '' })));
+    await done;
+    assert.equal(h.state.text, 'Fenced result.');
+  });
+});
+
+test('diagnostics: off without the folder; with it, outcome codes only and no draft or reply text', async t => {
+  const home = await mkdtemp(join(tmpdir(), 'ip-home-'));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const { existsSync, readdirSync, readFileSync } = await import('node:fs');
+  const wire = h => {
+    h.$.env = { get: async k => (k === 'HOME' ? home : undefined) };
+    h.$.fs.exists = async p => existsSync(p);
+    h.$.fs.write = (p, s) => writeFile(p, s);
+  };
+  const off = await host(); wire(off);
+  const d0 = off.press('improve-draft'); await off.started();
+  off.resolve(JSON.stringify({ prompt: 'SECRET REWRITE', issue: '' })); await d0;
+  assert.ok(!existsSync(join(home, 'Library/Logs/improve-prompt')));
+  await mkdir(join(home, 'Library/Logs/improve-prompt'), { recursive: true });
+  const h = await host(); wire(h);
+  const d1 = h.press('improve-draft'); await h.started();
+  h.resolve('not json SECRET REPLY'); await d1;
+  await new Promise(r => setTimeout(r, 30));
+  const files = readdirSync(join(home, 'Library/Logs/improve-prompt'));
+  assert.equal(files.length, 1);
+  const body = readFileSync(join(home, 'Library/Logs/improve-prompt', files[0]), 'utf8');
+  assert.ok(body.includes('"press"') && body.includes('"invalid-reply"'), body);
+  assert.ok(!body.includes('SECRET') && !body.includes('quoted commas'), body);
+});

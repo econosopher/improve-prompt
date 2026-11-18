@@ -104,6 +104,11 @@ Regular Claude chat is outside this mod's scope. No equivalent supported Codex
 composer read/replace API has been verified, so Codex retains the native skill
 picker and copyable rewrite.
 
+Optional diagnostics: create `~/Library/Logs/improve-prompt/` and the button
+writes one small file per session there, listing outcome codes and timings
+(press, improved, draft-changed, resync, invalid-reply and so on). It never
+records draft, reply or error text. Delete the folder to turn it off.
+
 To disable the button: `claude plugin disable improve-prompt@improve-prompt`.
 This does not delete the standalone skill or its model guidance.
 

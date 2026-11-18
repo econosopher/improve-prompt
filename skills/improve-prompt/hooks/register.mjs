@@ -123,6 +123,10 @@ async function improve($) {
       say($, 'draft-changed', 'Draft changed; rewrite discarded.',
         { ms: ms(), cancelled: job.cancelled, revMoved: revision !== job.revision }); return;
     }
+    if (!current.text.trim()) {
+      // Sent or cleared while rewriting, unreported: the draft is gone, so is the rewrite.
+      say($, 'draft-cleared', 'Draft was sent or cleared; rewrite discarded.', { ms: ms(), origLen: original.length }); return;
+    }
     if (current.text !== original && squash(current.text) !== squash(original)) {
       // The text moved but no edit reached this mod (the app does not always report one).
       // Keep the rewrite and let the user choose; Undo would restore what is there now.

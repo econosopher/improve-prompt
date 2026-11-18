@@ -345,3 +345,15 @@ test('a real edit after a held rewrite withdraws Replace anyway', async () => {
   await h.edit(0, 0, 'x');
   assert.ok(!JSON.stringify(await h.render()).includes('replace-anyway'));
 });
+
+test('a draft sent or cleared with no event discards the rewrite instead of offering Replace anyway', async () => {
+  const h = await host();
+  const done = h.press('improve-draft');
+  await h.started();
+  h.state.text = '';
+  h.resolve(JSON.stringify({ prompt: 'Rewritten.', issue: '' }));
+  await done;
+  assert.equal(h.state.text, '');
+  const band = JSON.stringify(await h.render());
+  assert.ok(!band.includes('replace-anyway') && band.includes('sent or cleared'), band);
+});

@@ -307,3 +307,41 @@ test('diagnostics: off without the folder; with it, outcome codes only and no dr
   assert.ok(body.includes('"press"') && body.includes('"invalid-reply"'), body);
   assert.ok(!body.includes('SECRET') && !body.includes('quoted commas'), body);
 });
+
+test('draft moved with no edit event: rewrite is held, Replace anyway applies it, Undo restores the moved text', async () => {
+  const h = await host();
+  const done = h.press('improve-draft');
+  await h.started();
+  h.state.text = 'fix quoted commas in the CSV parser. do not deploy. also tests';
+  h.resolve(JSON.stringify({ prompt: 'Rewritten.', issue: '' }));
+  await done;
+  assert.equal(h.state.text, 'fix quoted commas in the CSV parser. do not deploy. also tests');
+  const band = JSON.stringify(await h.render());
+  assert.ok(band.includes('replace-anyway') && band.includes('Draft changed while rewriting'), band);
+  await h.press('replace-anyway');
+  assert.equal(h.state.text, 'Rewritten.');
+  await h.press('undo-improve');
+  assert.equal(h.state.text, 'fix quoted commas in the CSV parser. do not deploy. also tests');
+});
+
+test('whitespace-only drift with no edit event still applies the rewrite', async () => {
+  const h = await host();
+  const done = h.press('improve-draft');
+  await h.started();
+  h.state.text = h.state.text + '\n';
+  h.resolve(JSON.stringify({ prompt: 'Rewritten.', issue: '' }));
+  await done;
+  assert.equal(h.state.text, 'Rewritten.');
+  assert.ok(JSON.stringify(await h.render()).includes('undo-improve'));
+});
+
+test('a real edit after a held rewrite withdraws Replace anyway', async () => {
+  const h = await host();
+  const done = h.press('improve-draft');
+  await h.started();
+  h.state.text = 'something else entirely';
+  h.resolve(JSON.stringify({ prompt: 'Rewritten.', issue: '' }));
+  await done;
+  await h.edit(0, 0, 'x');
+  assert.ok(!JSON.stringify(await h.render()).includes('replace-anyway'));
+});

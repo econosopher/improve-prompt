@@ -1,6 +1,8 @@
 // Hand-authored optional Claude mod; SKILL.md and references remain generated.
 let pending = null;
 let undo = null;
+// A finished rewrite kept after the draft changed with no edit event; offered as Replace anyway.
+let held = null;
 let revision = 0;
 let notice = '';
 let guidanceDirectory = '';
@@ -51,7 +53,8 @@ const changed = ($, why) => {
   // Only edits that cost something are logged; plain typing would rewrite the file per key.
   if (pending || undo) log($, 'changed', { why, pending: Boolean(pending), undo: Boolean(undo) });
   revision += 1;
-  const visible = Boolean(notice || undo || pending);
+  const visible = Boolean(notice || undo || pending || held);
+  held = null;
   notice = '';
   if (pending) {
     pending.cancelled = true;
@@ -66,6 +69,7 @@ async function improve($) {
   const job = { cancelled: false, revision };
   pending = job;
   notice = '';
+  held = null;
   const started = Date.now();
   const ms = () => Date.now() - started;
   log($, 'press');
@@ -115,20 +119,18 @@ async function improve($) {
     if (await $.session.model() !== model) { say($, 'model-changed', 'Model changed; draft kept. Try again.', { ms: ms() }); return; }
     await settled();
     const current = await $.prompt.read();
-    if (job.cancelled || revision !== job.revision || current.text !== original) {
+    if (job.cancelled || revision !== job.revision) {
       say($, 'draft-changed', 'Draft changed; rewrite discarded.',
-        { ms: ms(), cancelled: job.cancelled, revMoved: revision !== job.revision, textMoved: current.text !== original }); return;
+        { ms: ms(), cancelled: job.cancelled, revMoved: revision !== job.revision }); return;
+    }
+    if (current.text !== original && squash(current.text) !== squash(original)) {
+      // The text moved but no edit reached this mod (the app does not always report one).
+      // Keep the rewrite and let the user choose; Undo would restore what is there now.
+      held = { replacement, revision };
+      say($, 'draft-drifted', 'Draft changed while rewriting.', { ms: ms(), ...drift(original, current.text) }); return;
     }
     if (replacement === original) { say($, 'already-clear', 'Already clear; draft kept.', { ms: ms() }); return; }
-    ownFill = replacement;
-    const filled = await $.prompt.fill({ text: replacement, mode: 'replace' });
-    if (!filled.isFilled || filled.text !== replacement) {
-      say($, 'fill-refused', 'Composer could not accept the rewrite.', { ms: ms(), isFilled: Boolean(filled.isFilled) }); return;
-    }
-    known = replacement;
-    undo = { original, replacement, revision };
-    notice = '';
-    log($, 'improved', { ms: ms(), profile: Boolean(file) });
+    if (!await put($, current.text, replacement, 'improved', { ms: ms(), profile: Boolean(file) })) return;
     $.ui.toast(`Improved for ${model}${file ? '': ' (general guidance)'}. Review before sending.`, { timeoutMs: 4000 });
   } catch (err) {
     // Provider errors can contain request text. Keep them out of the UI/logs: name only.
@@ -138,6 +140,42 @@ async function improve($) {
     if (pending === job) pending = null;
     redraw($);
   }
+}
+
+// Whitespace-only differences (a trailing newline, a resynced space) are not a change.
+const squash = t => String(t ?? '').replace(/\s+/g, ' ').trim();
+// Content-free shape of a drift: lengths and how much of each end still matches.
+function drift(a, b) {
+  let p = 0; while (p < a.length && p < b.length && a[p] === b[p]) p++;
+  let q = 0; while (q < a.length - p && q < b.length - p && a[a.length - 1 - q] === b[b.length - 1 - q]) q++;
+  return { origLen: a.length, curLen: b.length, prefix: p, suffix: q };
+}
+// Put a rewrite in the box and arm Undo to restore `before`.
+async function put($, before, replacement, code, data) {
+  ownFill = replacement;
+  const filled = await $.prompt.fill({ text: replacement, mode: 'replace' });
+  if (!filled.isFilled || filled.text !== replacement) {
+    say($, 'fill-refused', 'Composer could not accept the rewrite.', { ...data, isFilled: Boolean(filled.isFilled) }); return false;
+  }
+  known = replacement;
+  undo = { original: before, replacement, revision };
+  notice = '';
+  log($, code, data);
+  return true;
+}
+
+async function replaceAnyway($) {
+  const saved = held;
+  if (!saved || pending) return;
+  held = null;
+  try {
+    await settled();
+    const current = await $.prompt.read();
+    await put($, current.text, saved.replacement, 'replaced-anyway');
+  } catch (err) {
+    say($, 'replace-failed', 'Composer could not accept the rewrite.', { error: typeof err?.name === 'string' ? err.name.slice(0, 40) : typeof err });
+  }
+  redraw($);
 }
 
 async function restore($) {
@@ -217,6 +255,7 @@ export function register(on, options = {}) {
       // whole rewrite settles.
       Button({ key: 'improve-draft', label: 'Improve', plain: true, dimColor: true,
         onPress: () => { improve($).catch(() => {}); } }),
+      ...(held ? [Button({ key: 'replace-anyway', label: 'Replace anyway', plain: true, dimColor: true, onPress: () => replaceAnyway($) })] : []),
       ...(undo ? [Button({ key: 'undo-improve', label: 'Undo', plain: true, dimColor: true, onPress: () => restore($) })] : []),
     ];
     return Box({ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 1, children: [
@@ -224,7 +263,7 @@ export function register(on, options = {}) {
       Box({ flexDirection: 'row', gap: 1, children: buttons }),
       ...(notice ? [Text({ dimColor: true, children: [notice] }),
         Button({ key: 'dismiss-notice', label: 'Dismiss', plain: true, dimColor: true,
-          onPress: () => { notice = ''; redraw($); } })] : []),
+          onPress: () => { notice = ''; held = null; redraw($); } })] : []),
     ] });
   });
 }

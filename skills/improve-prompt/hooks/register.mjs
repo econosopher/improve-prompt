@@ -48,7 +48,8 @@ function parseReply(text) {
 // the surface new button handles, and a click on an older drawing is dropped by the
 // engine ("ui_press not handled"); an identical redraw keeps them, so this only saves work.
 const changed = ($, why) => {
-  log($, 'changed', { why, pending: Boolean(pending), undo: Boolean(undo) });
+  // Only edits that cost something are logged; plain typing would rewrite the file per key.
+  if (pending || undo) log($, 'changed', { why, pending: Boolean(pending), undo: Boolean(undo) });
   revision += 1;
   const visible = Boolean(notice || undo || pending);
   notice = '';

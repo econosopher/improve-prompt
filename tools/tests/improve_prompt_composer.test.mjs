@@ -295,6 +295,9 @@ test('diagnostics: off without the folder; with it, outcome codes only and no dr
   assert.ok(!existsSync(join(home, 'Library/Logs/improve-prompt')));
   await mkdir(join(home, 'Library/Logs/improve-prompt'), { recursive: true });
   const h = await host(); wire(h);
+  for (let i = 0; i < 3; i++) await h.edit(0, 0, 'x');
+  await new Promise(r => setTimeout(r, 30));
+  assert.equal(readdirSync(join(home, 'Library/Logs/improve-prompt')).length, 0, 'plain typing writes nothing');
   const d1 = h.press('improve-draft'); await h.started();
   h.resolve('not json SECRET REPLY'); await d1;
   await new Promise(r => setTimeout(r, 30));

@@ -308,22 +308,6 @@ test('diagnostics: off without the folder; with it, outcome codes only and no dr
   assert.ok(!body.includes('SECRET') && !body.includes('quoted commas'), body);
 });
 
-test('draft moved with no edit event: rewrite is held, Replace anyway applies it, Undo restores the moved text', async () => {
-  const h = await host();
-  const done = h.press('improve-draft');
-  await h.started();
-  h.state.text = 'fix quoted commas in the CSV parser. do not deploy. also tests';
-  h.resolve(JSON.stringify({ prompt: 'Rewritten.', issue: '' }));
-  await done;
-  assert.equal(h.state.text, 'fix quoted commas in the CSV parser. do not deploy. also tests');
-  const band = JSON.stringify(await h.render());
-  assert.ok(band.includes('replace-anyway') && band.includes('Draft changed while rewriting'), band);
-  await h.press('replace-anyway');
-  assert.equal(h.state.text, 'Rewritten.');
-  await h.press('undo-improve');
-  assert.equal(h.state.text, 'fix quoted commas in the CSV parser. do not deploy. also tests');
-});
-
 test('whitespace-only drift with no edit event still applies the rewrite', async () => {
   const h = await host();
   const done = h.press('improve-draft');
@@ -335,18 +319,10 @@ test('whitespace-only drift with no edit event still applies the rewrite', async
   assert.ok(JSON.stringify(await h.render()).includes('undo-improve'));
 });
 
-test('a real edit after a held rewrite withdraws Replace anyway', async () => {
-  const h = await host();
-  const done = h.press('improve-draft');
-  await h.started();
-  h.state.text = 'something else entirely';
-  h.resolve(JSON.stringify({ prompt: 'Rewritten.', issue: '' }));
-  await done;
-  await h.edit(0, 0, 'x');
-  assert.ok(!JSON.stringify(await h.render()).includes('replace-anyway'));
-});
 
-test('an empty read with no event (chat switched away) holds the rewrite for Replace anyway', async () => {
+const waitFor = async (cond, ms = 6000) => { for (let i = 0; i < ms / 20 && !await cond(); i++) await new Promise(r => setTimeout(r, 20)); };
+
+test('box reads empty mid-rewrite (another chat): the rewrite lands by itself when the draft is back, with Undo', async () => {
   const h = await host(), original = h.state.text;
   const done = h.press('improve-draft');
   await h.started();
@@ -355,22 +331,40 @@ test('an empty read with no event (chat switched away) holds the rewrite for Rep
   h.resolve(JSON.stringify({ prompt: 'Rewritten.', issue: '' }));
   await done;
   assert.equal(h.state.text, original);
-  assert.ok(JSON.stringify(await h.render()).includes('replace-anyway'));
+  const band = JSON.stringify(await h.render());
+  assert.ok(!band.includes('replace-anyway') && !band.includes('changed'), band);
   h.$.prompt.read = read;
-  await h.press('replace-anyway');
+  await h.render();
+  await waitFor(() => h.state.text === 'Rewritten.');
   assert.equal(h.state.text, 'Rewritten.');
   await h.press('undo-improve');
   assert.equal(h.state.text, original);
 });
 
-test('Replace anyway into a box that really is empty drops the rewrite', async () => {
+test('a held rewrite is dropped quietly if the draft came back different or was sent', async t => {
+  for (const kind of ['different', 'sent']) await t.test(kind, async () => {
+    const h = await host();
+    const done = h.press('improve-draft');
+    await h.started();
+    const read = h.$.prompt.read;
+    h.$.prompt.read = async () => ({ text: '', cursor: 0 });
+    h.resolve(JSON.stringify({ prompt: 'Rewritten.', issue: '' }));
+    await done;
+    h.$.prompt.read = read;
+    if (kind === 'different') { h.state.text = 'something else'; await h.render(); await new Promise(r => setTimeout(r, 100)); }
+    else { h.state.text = ''; await h.event('prompt.change', { text: '', cursor: 0, origin: { kind: 'clear' } }); h.state.text = 'next prompt'; await h.render(); await new Promise(r => setTimeout(r, 100)); }
+    assert.equal(h.state.fills, 0);
+    assert.ok(!JSON.stringify(await h.render()).includes('undo-improve'));
+  });
+});
+
+test('text that changed unreported while rewriting keeps your text, no extra button', async () => {
   const h = await host();
   const done = h.press('improve-draft');
   await h.started();
-  h.state.text = '';
+  h.state.text = 'something else entirely';
   h.resolve(JSON.stringify({ prompt: 'Rewritten.', issue: '' }));
   await done;
-  await h.press('replace-anyway');
-  assert.equal(h.state.text, '');
-  assert.ok(JSON.stringify(await h.render()).includes('rewrite dropped'));
+  assert.equal(h.state.text, 'something else entirely');
+  assert.ok(!JSON.stringify(await h.render()).includes('replace-anyway'));
 });

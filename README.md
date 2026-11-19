@@ -81,10 +81,9 @@ then Tab to focus the button; press Enter to activate it. Tab moves to Undo.
 It uses the current session's model and credentials. Your normal model usage
 applies. Typing or sending while a rewrite runs discards its result. **Cancel
 rewrite** keeps the draft but does not cancel provider billing for the request.
-Failures and essential ambiguities leave the draft in place. If the draft changes while a rewrite runs without the
-app reporting an edit, the rewrite is held and **Replace anyway** applies it;
-Undo then restores the draft as it was just before. The same applies when the box reads empty
-because you switched chats during the rewrite.
+Failures and essential ambiguities leave the draft in place. If you switch to another chat while a rewrite runs, it
+waits and drops in by itself when you come back to the same draft (Undo works as
+usual); if the draft changed or was sent meanwhile, it is quietly dropped.
 
 Only the draft and saved guidance go to the rewrite call. Conversation history
 and attachments are not read. Exact known model IDs use saved profiles; other

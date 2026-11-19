@@ -1,8 +1,10 @@
 // Hand-authored optional Claude mod; SKILL.md and references remain generated.
 let pending = null;
 let undo = null;
-// A finished rewrite kept after the draft changed with no edit event; offered as Replace anyway.
+// A finished rewrite waiting for the draft to come back into view (the box reads empty while
+// you are in another chat). It lands by itself once the box shows the original draft again.
 let held = null;
+let checking = false;
 let revision = 0;
 let notice = '';
 let guidanceDirectory = '';
@@ -127,14 +129,14 @@ async function improve($) {
       // The box read empty with no event. Watch logs show this when you switch chats while
       // the rewrite runs and the draft is intact on return, so keep it; a real send or
       // clear reports a change and withdraws it.
-      held = { replacement, revision };
-      say($, 'draft-unreachable', 'Rewrite ready.', { ms: ms(), origLen: original.length }); return;
+      held = { original, replacement, revision, model, file, at: Date.now() };
+      log($, 'held', { ms: ms(), origLen: original.length });
+      setTimeout(() => land($), 1500);
+      return;
     }
     if (current.text !== original && squash(current.text) !== squash(original)) {
-      // The text moved but no edit reached this mod (the app does not always report one).
-      // Keep the rewrite and let the user choose; Undo would restore what is there now.
-      held = { replacement, revision };
-      say($, 'draft-drifted', 'Draft changed while rewriting.', { ms: ms(), ...drift(original, current.text) }); return;
+      // The text moved but no edit reached this mod. Your text wins.
+      say($, 'draft-drifted', 'Draft changed while rewriting; kept your text.', { ms: ms(), ...drift(original, current.text) }); return;
     }
     if (replacement === original) { say($, 'already-clear', 'Already clear; draft kept.', { ms: ms() }); return; }
     if (!await put($, current.text, replacement, 'improved', { ms: ms(), profile: Boolean(file) })) return;
@@ -171,19 +173,31 @@ async function put($, before, replacement, code, data) {
   return true;
 }
 
-async function replaceAnyway($) {
-  const saved = held;
-  if (!saved || pending) return;
-  held = null;
+// Land a held rewrite once the box shows the original draft again. Re-checked on every
+// redraw, on a resync, and every 2 s; gives up after 15 minutes or if the draft changed.
+async function land($) {
+  const h = held;
+  if (!h || pending || checking) return;
+  checking = true;
   try {
+    if (Date.now() - h.at > 15 * 60 * 1000) { held = null; log($, 'held-expired'); return; }
     await settled();
     const current = await $.prompt.read();
-    if (!current.text.trim()) { say($, 'replace-empty', 'The draft is empty; rewrite dropped.'); }
-    else await put($, current.text, saved.replacement, 'replaced-anyway');
+    if (held !== h) return;
+    if (!current.text.trim()) { setTimeout(() => land($), 2000); return; }
+    held = null;
+    if (squash(current.text) !== squash(h.original)) {
+      log($, 'held-dropped', drift(h.original, current.text)); return;
+    }
+    if (await put($, current.text, h.replacement, 'held-landed', { waited: Date.now() - h.at }))
+      $.ui.toast(`Improved for ${h.model}${h.file ? '' : ' (general guidance)'}. Review before sending.`, { timeoutMs: 4000 });
+    redraw($);
   } catch (err) {
-    say($, 'replace-failed', 'Composer could not accept the rewrite.', { error: typeof err?.name === 'string' ? err.name.slice(0, 40) : typeof err });
+    log($, 'held-failed', { error: typeof err?.name === 'string' ? err.name.slice(0, 40) : typeof err });
+    if (held === h) setTimeout(() => land($), 2000);
+  } finally {
+    checking = false;
   }
-  redraw($);
 }
 
 async function restore($) {
@@ -239,7 +253,7 @@ export function register(on, options = {}) {
     const own = (ownFill !== null && e?.text === ownFill) ||
       (e?.origin?.kind === 'plugin' && e.origin.name === $.plugin.name);
     const same = typeof e?.text === 'string' && known !== null && e.text === known;
-    if (own || same) log($, own ? 'own-fill' : 'resync', { origin: String(e?.origin?.kind ?? '') });
+    if (own || same) { log($, own ? 'own-fill' : 'resync', { origin: String(e?.origin?.kind ?? '') }); if (held) land($); }
     else changed($, `change:${String(e?.origin?.kind ?? '').slice(0, 30)}`);
     if (typeof e?.text === 'string') known = e.text;
     return next(e);
@@ -247,6 +261,7 @@ export function register(on, options = {}) {
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const previous = await next(e);
+    if (held) land($);
     if (e.props.hasSurvey) return previous;
     const { Box, Text, Button } = $.ui.resolve(e);
     const buttons = pending ? [
@@ -263,7 +278,6 @@ export function register(on, options = {}) {
       // whole rewrite settles.
       Button({ key: 'improve-draft', label: 'Improve', plain: true, dimColor: true,
         onPress: () => { improve($).catch(() => {}); } }),
-      ...(held ? [Button({ key: 'replace-anyway', label: 'Replace anyway', plain: true, dimColor: true, onPress: () => replaceAnyway($) })] : []),
       ...(undo ? [Button({ key: 'undo-improve', label: 'Undo', plain: true, dimColor: true, onPress: () => restore($) })] : []),
     ];
     return Box({ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 1, children: [
@@ -271,7 +285,7 @@ export function register(on, options = {}) {
       Box({ flexDirection: 'row', gap: 1, children: buttons }),
       ...(notice ? [Text({ dimColor: true, children: [notice] }),
         Button({ key: 'dismiss-notice', label: 'Dismiss', plain: true, dimColor: true,
-          onPress: () => { notice = ''; held = null; redraw($); } })] : []),
+          onPress: () => { notice = ''; redraw($); } })] : []),
     ] });
   });
 }

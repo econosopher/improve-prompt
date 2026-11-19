@@ -86,9 +86,11 @@ waits and drops in by itself when you come back to the same draft (Undo works as
 usual); if the draft changed or was sent meanwhile, it is quietly dropped.
 
 Only the draft and saved guidance go to the rewrite call. Conversation history
-and attachments are not read. Exact known model IDs use saved profiles; other
-versions use general guidance, shown in a brief notification after a rewrite. Use the skill command
-for an explicit target-model override or guidance refresh.
+and attachments are not read. An exact saved profile takes precedence. Other
+versions borrow wording advice from the closest saved version of the same model
+line and provider. Unknown models and lines without a saved profile use general
+guidance. The completion notice identifies borrowed or general guidance. Use the
+skill command for an explicit target-model override or guidance refresh.
 
 The button rereads the skill and its model-routing table on every click. To share
 guidance with an existing installation, set the plugin’s optional

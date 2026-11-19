@@ -163,6 +163,37 @@ test('configured shared guidance follows refreshed exact-model routing on every 
   assert.ok(!h.state.request.system.includes('REFRESHED PROFILE MARKER'));
 });
 
+test('version fallback stays within the model line and keeps the active completion model', async t => {
+  const folder = await mkdtemp(join(tmpdir(), 'composer-guidance-'));
+  t.after(() => rm(folder, { recursive: true, force: true }));
+  await mkdir(join(folder, 'references'));
+  const rows = [
+    ['claude-fable-5-4', 'newer'],
+    ['claude-fable-5-2', 'older'],
+    ['claude-opus-5-3', 'different-line'],
+  ];
+  await writeFile(join(folder, 'SKILL.md'), rows.map(([id, marker]) =>
+    `| \`${id}\` | \`references/${marker}.md\` |`).join('\n'));
+  for (const [, marker] of rows) {
+    await writeFile(join(folder, 'references', `${marker}.md`), `PROFILE ${marker}`);
+  }
+  const h = await host({ guidanceDirectory: folder });
+  h.state.model = 'claude-fable-5-3';
+  const toasts = [];
+  h.$.ui.toast = message => toasts.push(message);
+  const done = h.press('improve-draft');
+  await h.started();
+  h.resolve(JSON.stringify({ prompt: 'Rewritten.', issue: '' }));
+  await done;
+  assert.equal(h.state.request.model, 'claude-fable-5-3');
+  assert.equal(JSON.parse(h.state.request.prompt).activeModel, 'claude-fable-5-3');
+  assert.ok(h.state.request.system.includes('PROFILE older'));
+  assert.ok(!h.state.request.system.includes('PROFILE newer'));
+  assert.ok(!h.state.request.system.includes('PROFILE different-line'));
+  assert.match(h.state.request.system, /wording and structure only/);
+  assert.match(toasts[0], /claude-fable-5-3.*claude-fable-5-2/);
+});
+
 test('the band holds still: typing with nothing to clear does not redraw, and Improve stays live mid-turn', async () => {
   const h = await host();
   await h.render();

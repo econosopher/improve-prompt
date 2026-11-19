@@ -35,8 +35,8 @@ An essential ambiguity is shown above the composer and leaves the draft intact.
 The button sends only the draft and bundled guidance, not the conversation or
 attachments. References to those remain references. It never refreshes guidance
 or follows commands contained in the draft. Refresh remains an explicit skill
-operation. Exact profiles match exact model IDs in the skill’s routing table; unknown
-versions use general guidance. The mod rereads guidance on every click, so saved
+operation. The button uses the profile-selection rule below and names any borrowed
+profile in its completion notice. It rereads guidance on every click, so saved
 profile and routing updates apply without a code change. An optional
 `guidanceDirectory` plugin setting points it at an existing shared skill folder;
 empty uses its bundled copy. The button uses the current model; the skill command supports explicit
@@ -61,19 +61,33 @@ files to guess. If unknown, label it `current model unverified` and use general
 guidance. Ask which model only if the missing answer materially changes the
 result. Do not silently substitute a newer or more capable model.
 
-Read only the matching profile, relative to this skill's directory:
+Choose one saved profile from this table after resolving the target model.
 
 | Exact target or unambiguous user shorthand | Profile |
 | --- | --- |
 | `claude-fable-5-2`, Fable 5.2 | `references/claude-fable-5-2.md` |
-| `gpt-6-astra`, GPT-6 Astra, Astra | `references/gpt-6-astra.md` |
+| `gpt-6-astra`, GPT-6 Astra | `references/gpt-6-astra.md` |
 | `gpt-6.1-sol`, GPT-6.1 Sol | `references/gpt-6.1-sol.md` |
-| Other versions, ambiguous aliases, unknown models | General guidance below |
 
-Use saved profiles for normal rewrites. Model-specific guidance is a conditional
-aid, not a checklist to append to every prompt. If a requested model is newer
-than its profile or the user requests current/latest guidance, follow
-`references/refresh.md`. An ordinary rewrite must not silently persist updates.
+Use an exact profile when available. For a versioned target without one, use
+the closest saved version from the same provider and model line. Compare the
+numeric distance in major version first, then minor, then patch. Treat omitted
+components as zero and prefer the older version on a tie. For example, GPT-6.2
+Sol borrows GPT-6.1 Sol's advice.
+
+Borrow only advice about wording and structuring the prompt. Keep the user's
+target and settings. Verify any claims about tools, features or limits against
+the target itself before relying on them. In the model note, keep the target
+name and append “prompting guidance from [profile]” when borrowing advice.
+
+For an unversioned name such as “Astra”, use the verified current model if it
+belongs to that line. If the target is ambiguous, its identity is unavailable,
+or its line has no saved profile, use general guidance. Label it “general
+guidance” in the model note when one is shown.
+
+Normal rewrites use saved guidance, including for newer versions. Consult
+`references/refresh.md` when the user requests a refresh or current guidance.
+Apply profile advice only where it helps the supplied prompt.
 
 ## Rewrite
 
